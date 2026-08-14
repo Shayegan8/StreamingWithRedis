@@ -39,7 +39,6 @@ const server = net.createServer((socket) => {
                 let DSTPORT
                 let portOffset
                 let addressLength
-                // data transfering between proxy and application server happnes here
                 switch (data[3]) { // ATYP
                     case 0x01: // IPv4
                         DSTADDR = [data[4], data[5], data[6], data[7]].join('.')
