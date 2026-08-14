@@ -172,6 +172,15 @@ setImmediate(async () => {
     }
 })
 
+setInterval(() => {
+    try {
+        conn.ping()
+        blconn.ping()
+    } catch (e) {
+        logger("Error ping: " + e, "error")
+    }
+}, 10000)
+
 process.on('SIGTERM', () => {
     for (const element of sockets.keys())
         conn.del(`appserver,${element}`)
