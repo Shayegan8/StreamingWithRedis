@@ -144,6 +144,7 @@ const server = net.createServer((socket) => {
                                 if (!response) {
                                     logger(`end for ${connectionID} from targetServer`)
                                     socket.end()
+                                    await conn.del(`appserver,${connectionID}`)
                                     break
                                 }
 
@@ -151,6 +152,7 @@ const server = net.createServer((socket) => {
                                 if (!Buffer.from('end', 'binary').compare(response![1])) {
                                     logger(`response for ${connectionID} is null ;(`)
                                     socket.end()
+                                    await conn.del(`appserver,${connectionID}`)
 
                                     break
                                 }
