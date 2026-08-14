@@ -1,0 +1,24 @@
+{
+  "name": "stupidgithubvpn",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node dist/index.js"
+  },
+  "dependencies": {
+    "@types/redis": "^4.0.10",
+    "ioredis": "^5.10.1",
+    "p-queue": "^9.3.3",
+    "pg": "^8.20.0",
+    "redis": "^5.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/pg": "^8.20.0"
+  }
+}
