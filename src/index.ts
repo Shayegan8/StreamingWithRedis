@@ -39,6 +39,7 @@ const server = net.createServer((socket) => {
                 let DSTPORT
                 let portOffset
                 let addressLength
+                // data transfering between proxy and application server happnes here
                 switch (data[3]) { // ATYP
                     case 0x01: // IPv4
                         DSTADDR = [data[4], data[5], data[6], data[7]].join('.')
@@ -140,7 +141,12 @@ const server = net.createServer((socket) => {
                             tls: { servername: config.servername }
                         })
                         const pinger = setInterval(async () => {
-                            await blconn.ping()
+                            try {
+                                await blconn.ping()
+                            } catch (e) {
+                                logger("pinger: " + e)
+                                clearInterval(pinger)
+                            }
                         }, 10000)
 
                         while (true) {
@@ -148,10 +154,10 @@ const server = net.createServer((socket) => {
                                 const response = await blconn.brpopBuffer(`appserver,${connectionID}`, 0)
                                 if (!response) {
                                     logger(`end for ${connectionID} from targetServer`)
+                                    await conn.del(`appserver,${connectionID}`)
                                     clearInterval(pinger)
                                     blconn.disconnect()
                                     socket.end()
-                                    await conn.del(`appserver,${connectionID}`)
                                     break
                                 }
 
@@ -166,7 +172,8 @@ const server = net.createServer((socket) => {
                                 }
                                 socket.write(response![1])
                             } catch (error) {
-                                logger(`handling a job that no longer exist, ${connectionID}`, "error")
+                                logger(`${error}`)
+                                break
                             }
                         }
                         break
@@ -178,8 +185,13 @@ const server = net.createServer((socket) => {
     })
 })
 
+
 setInterval(async () => {
-    conn.ping()
+    try {
+        conn.ping()
+    } catch (e) {
+        logger("gPinger: " + e)
+    }
 }, 10000)
 
 process.on('SIGTERM', () => {

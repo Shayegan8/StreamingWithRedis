@@ -78,119 +78,131 @@ setImmediate(async () => {
         const connectionID = things[2]!
         logger("Waiting for shit " + `proxy,${connectionID}`)
         setImmediate(async () => {
-            const blconn1 = new Redis(config.connstring, {
-                maxRetriesPerRequest: null,
-                tls: { servername: config.servername }
-            })
-            const pinger = setInterval(async () => {
-                await blconn1.ping()
-            }, 10000)
+            try {
+                const blconn1 = new Redis(config.connstring, {
+                    maxRetriesPerRequest: null,
+                    tls: { servername: config.servername }
+                })
+                const pinger = setInterval(async () => {
+                    try {
+                        await blconn1.ping()
+                    } catch (e) {
+                        logger("pinger: " + e)
+                        clearInterval(pinger)
+                    }
+                }, 10000)
 
-            while (true) {
-                const request = (await blconn1.brpopBuffer(`proxy,${connectionID}`, 0))?.[1]
-                logger("What 3 is request\n" + request![1])
-                if (!request) {
-                    logger("request is null")
-                    clearInterval(pinger)
-                    blconn1.disconnect()
-                    sockets.delete(connectionID)
-                    break
-                } else if (!Buffer.from('end', 'binary').compare(request)) {
-                    logger("breaking the " + connectionID)
-                    clearInterval(pinger)
-                    blconn1.disconnect()
-                    sockets.delete(connectionID)
-                    break
-                }
-                if (!sockets.has(connectionID)) {
-                    const fastestWorkingIP = await getFastestIP(dstaddr, dstport)
-                    if (!fastestWorkingIP) {
-                        logger("There is no working DNS for such an address", "error")
-                        await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                while (true) {
+                    const request = (await blconn1.brpopBuffer(`proxy,${connectionID}`, 0))?.[1]
+                    logger("What 3 is request\n" + request![1])
+                    if (!request) {
+                        logger("request is null")
                         clearInterval(pinger)
                         blconn1.disconnect()
                         sockets.delete(connectionID)
                         break
-                    }
-
-                    const appServer = net.createConnection(dstport, fastestWorkingIP)
-                    sockets.set(connectionID, appServer)
-                    const res = await new Promise<Boolean>((resolve) => {
-                        const connectionTimeout = setTimeout(() => {
-                            logger("IAM IN FUCKING TIMEOUTTTT FOR" + connectionID)
-                            if (appServer)
-                                appServer.destroy()
-                            resolve(false)
-                        }, 25000)
-                        appServer.once('connect', async () => {
-                            clearTimeout(connectionTimeout)
-                            logger(connectionID + " finally connected")
-                            resolve(true)
-                        })
-                        appServer.once('error', () => {
-                            clearTimeout(connectionTimeout)
-                            logger(`Can't reach ${dstaddr}:${dstport}`)
-                            if (appServer)
-                                appServer.destroy()
-                            resolve(true)
-                        })
-                    })
-                    if (!res) {
+                    } else if (!Buffer.from('end', 'binary').compare(request)) {
+                        logger("breaking the " + connectionID)
+                        sockets.delete(connectionID)
                         clearInterval(pinger)
                         blconn1.disconnect()
                         break
                     }
-
-                    sockets.get(connectionID)?.write(request)
-                    let buffass: Buffer[] = []
-                    let timeout: NodeJS.Timeout
-                    let pqueue = new PQueue({ concurrency: 1 })
-                    let length = 0
-                    appServer.on('data', (data: Buffer) => {
-                        pqueue.add(() => {
-                            if (timeout)
-                                clearTimeout(timeout)
-                            logger("we received data! ")
-                            length += data.length
-                            buffass.push(data)
-                            pqueue.add(async () => {
-                                if (length > 1024 * 1024 * 2) { // bigger than 2mb
-                                    await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
-                                    logger("shit")
-                                    buffass = []
-                                    length = 0
-                                }
+                    if (!sockets.has(connectionID)) {
+                        const fastestWorkingIP = await getFastestIP(dstaddr, dstport)
+                        if (!fastestWorkingIP) {
+                            logger("There is no working DNS for such an address", "error")
+                            await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                            clearInterval(pinger)
+                            blconn1.disconnect()
+                            sockets.delete(connectionID)
+                            break
+                        }
+                        const appServer = net.createConnection(dstport, fastestWorkingIP)
+                        sockets.set(connectionID, appServer)
+                        const res = await new Promise<Boolean>((resolve) => {
+                            const connectionTimeout = setTimeout(() => {
+                                logger("IAM IN FUCKING TIMEOUTTTT FOR" + connectionID)
+                                if (appServer)
+                                    appServer.destroy()
+                                resolve(false)
+                            }, 25000)
+                            appServer.once('connect', async () => {
+                                clearTimeout(connectionTimeout)
+                                logger(connectionID + " finally connected")
+                                resolve(true)
                             })
-                            timeout = setTimeout(() => {
-                                if (!length)
-                                    return
-                                pqueue.add(async () => {
-                                    await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
-                                    logger("shit")
-                                    buffass = []
-                                    length = 0
-                                })
-                            }, 100)
+                            appServer.once('error', () => {
+                                clearTimeout(connectionTimeout)
+                                logger(`Can't reach ${dstaddr}:${dstport}`)
+                                if (appServer)
+                                    appServer.destroy()
+                                resolve(false)
+                            })
                         })
-                    })
+                        if (!res) {
+                            clearInterval(pinger)
+                            blconn1.disconnect()
+                            break
+                        }
 
-                    // notify the proxy appserver dont sends data anymore (half close)
-                    appServer.on('end', async () => {
-                        await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
-                        clearInterval(pinger)
-                        blconn1.disconnect()
-                        sockets.delete(connectionID)
-                    })
-                } else
-                    sockets.get(connectionID)?.write(request)
+                        sockets.get(connectionID)?.write(request)
+                        let buffass: Buffer[] = []
+                        let timeout: NodeJS.Timeout
+                        let pqueue = new PQueue({ concurrency: 1 })
+                        let length = 0
+                        appServer.on('data', (data: Buffer) => {
+                            pqueue.add(() => {
+                                if (timeout)
+                                    clearTimeout(timeout)
+                                logger("we received data! ")
+                                length += data.length
+                                buffass.push(data)
+                                pqueue.add(async () => {
+                                    if (length > 1024 * 1024 * 2) { // bigger than 2mb
+                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
+                                        logger("shit")
+                                        buffass = []
+                                        length = 0
+                                    }
+                                })
+                                timeout = setTimeout(() => {
+                                    if (!length)
+                                        return
+                                    pqueue.add(async () => {
+                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
+                                        logger("shit")
+                                        buffass = []
+                                        length = 0
+                                    })
+                                }, 100)
+                            })
+                        })
+
+                        // notify the proxy appserver dont sends data anymore (half close)
+                        appServer.on('end', async () => {
+                            await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                            clearInterval(pinger)
+                            blconn1.disconnect()
+                            sockets.delete(connectionID)
+                        })
+                    } else
+                        sockets.get(connectionID)?.write(request)
+                }
+            } catch (e) {
+                logger(`${e}`)
             }
         })
     }
 })
 
-setInterval(() => {
-    conn.ping()
-    blconn.ping()
+setInterval(async () => {
+    try {
+        conn.ping()
+        blconn.ping()
+    } catch (e) {
+        logger("gPinger: " + e)
+    }
 }, 10000)
 
 process.on('SIGTERM', () => {
