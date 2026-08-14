@@ -87,10 +87,12 @@ setImmediate(async () => {
                 logger("What 3 is request\n" + request![1])
                 if (!request) {
                     logger("request is null")
+                    blconn1.disconnect()
                     sockets.delete(connectionID)
                     break
                 } else if (!Buffer.from('end', 'binary').compare(request)) {
                     logger("breaking the " + connectionID)
+                    blconn1.disconnect()
                     sockets.delete(connectionID)
                     break
                 }
@@ -99,6 +101,7 @@ setImmediate(async () => {
                     if (!fastestWorkingIP) {
                         logger("There is no working DNS for such an address", "error")
                         await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                        blconn1.disconnect()
                         sockets.delete(connectionID)
                         break
                     }
@@ -124,8 +127,10 @@ setImmediate(async () => {
                             resolve(true)
                         })
                     })
-                    if (!res)
+                    if (!res) {
+                        blconn1.disconnect()
                         break
+                    }
 
                     sockets.get(connectionID)?.write(request)
                     let buffass: Buffer[] = []
@@ -163,6 +168,7 @@ setImmediate(async () => {
                     // notify the proxy appserver dont sends data anymore (half close)
                     appServer.on('end', async () => {
                         await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                        blconn1.disconnect()
                         sockets.delete(connectionID)
                     })
                 } else

@@ -114,6 +114,7 @@ const server = net.createServer((socket) => {
 
                         socket.on('end', () => {
                             conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
+                            blconn.disconnect()
                             connlist.delete(connectionID)
                             clearInterval(interv)
                         })
@@ -143,6 +144,7 @@ const server = net.createServer((socket) => {
                                 const response = await blconn.brpopBuffer(`appserver,${connectionID}`, 0)
                                 if (!response) {
                                     logger(`end for ${connectionID} from targetServer`)
+                                    blconn.disconnect()
                                     socket.end()
                                     await conn.del(`appserver,${connectionID}`)
                                     break
@@ -151,9 +153,9 @@ const server = net.createServer((socket) => {
                                 logger(`this mf got fucking called, ${connectionID}`)
                                 if (!Buffer.from('end', 'binary').compare(response![1])) {
                                     logger(`response for ${connectionID} is null ;(`)
+                                    blconn.disconnect()
                                     socket.end()
                                     await conn.del(`appserver,${connectionID}`)
-
                                     break
                                 }
                                 socket.write(response![1])
