@@ -114,6 +114,7 @@ const server = net.createServer((socket) => {
 
                         socket.on('end', () => {
                             conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
+                            clearInterval(pinger)
                             blconn.disconnect()
                             connlist.delete(connectionID)
                             clearInterval(interv)
@@ -139,11 +140,16 @@ const server = net.createServer((socket) => {
                             maxRetriesPerRequest: null,
                             tls: { servername: config.servername }
                         })
+                        const pinger = setInterval(async () => {
+                            await blconn.ping()
+                        }, 10000)
+
                         while (true) {
                             try {
                                 const response = await blconn.brpopBuffer(`appserver,${connectionID}`, 0)
                                 if (!response) {
                                     logger(`end for ${connectionID} from targetServer`)
+                                    clearInterval(pinger)
                                     blconn.disconnect()
                                     socket.end()
                                     await conn.del(`appserver,${connectionID}`)
@@ -153,6 +159,7 @@ const server = net.createServer((socket) => {
                                 logger(`this mf got fucking called, ${connectionID}`)
                                 if (!Buffer.from('end', 'binary').compare(response![1])) {
                                     logger(`response for ${connectionID} is null ;(`)
+                                    clearInterval(pinger)
                                     blconn.disconnect()
                                     socket.end()
                                     await conn.del(`appserver,${connectionID}`)
@@ -171,6 +178,10 @@ const server = net.createServer((socket) => {
         })
     })
 })
+
+setInterval(async () => {
+    conn.ping()
+}, 10000)
 
 process.on('SIGTERM', () => {
     for (const element of connlist.keys())

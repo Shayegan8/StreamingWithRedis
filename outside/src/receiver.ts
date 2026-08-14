@@ -82,16 +82,22 @@ setImmediate(async () => {
                 maxRetriesPerRequest: null,
                 tls: { servername: config.servername }
             })
+            const pinger = setInterval(async () => {
+                await blconn1.ping()
+            }, 10000)
+
             while (true) {
                 const request = (await blconn1.brpopBuffer(`proxy,${connectionID}`, 0))?.[1]
                 logger("What 3 is request\n" + request![1])
                 if (!request) {
                     logger("request is null")
+                    clearInterval(pinger)
                     blconn1.disconnect()
                     sockets.delete(connectionID)
                     break
                 } else if (!Buffer.from('end', 'binary').compare(request)) {
                     logger("breaking the " + connectionID)
+                    clearInterval(pinger)
                     blconn1.disconnect()
                     sockets.delete(connectionID)
                     break
@@ -101,10 +107,12 @@ setImmediate(async () => {
                     if (!fastestWorkingIP) {
                         logger("There is no working DNS for such an address", "error")
                         await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                        clearInterval(pinger)
                         blconn1.disconnect()
                         sockets.delete(connectionID)
                         break
                     }
+
                     const appServer = net.createConnection(dstport, fastestWorkingIP)
                     sockets.set(connectionID, appServer)
                     const res = await new Promise<Boolean>((resolve) => {
@@ -128,6 +136,7 @@ setImmediate(async () => {
                         })
                     })
                     if (!res) {
+                        clearInterval(pinger)
                         blconn1.disconnect()
                         break
                     }
@@ -168,6 +177,7 @@ setImmediate(async () => {
                     // notify the proxy appserver dont sends data anymore (half close)
                     appServer.on('end', async () => {
                         await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                        clearInterval(pinger)
                         blconn1.disconnect()
                         sockets.delete(connectionID)
                     })
@@ -179,12 +189,8 @@ setImmediate(async () => {
 })
 
 setInterval(() => {
-    try {
-        conn.ping()
-        blconn.ping()
-    } catch (e) {
-        logger("Error ping: " + e, "error")
-    }
+    conn.ping()
+    blconn.ping()
 }, 10000)
 
 process.on('SIGTERM', () => {
