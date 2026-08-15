@@ -11,14 +11,22 @@ const conn = new Redis(config.connstring, {
     tls: { servername: config.servername }
 })
 
-conn.ping()
+try {
+    conn.ping()
+} catch (e) {
+    logger("conn ping error: " + e, "error")
+}
 
 const blconn = new Redis(config.connstring, {
     maxRetriesPerRequest: null,
     tls: { servername: config.servername }
 })
 
-blconn.ping()
+try {
+    blconn.ping()
+} catch (e) {
+    logger("blconn ping error: " + e, "error")
+}
 
 function logger(param: string, type?: string) {
     console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
@@ -72,7 +80,6 @@ setImmediate(async () => {
     while (true) {
         logger("Waiting for inform", "info")
         const payload = await blconn.blpop(`inform`, 0)
-        logger(`${payload}`)
         const things = payload?.[1].split(',')!
         const dstaddr = things[0]!
         const dstport = parseInt(things[1]!)
@@ -84,7 +91,14 @@ setImmediate(async () => {
                     maxRetriesPerRequest: null,
                     tls: { servername: config.servername }
                 })
-                blconn1.ping()
+
+                try {
+                    blconn1.ping()
+                } catch (e) {
+                    logger("blconn1 ping error: " + e, "error")
+                    return
+                }
+
                 const pinger = setInterval(async () => {
                     try {
                         await blconn1.ping()
@@ -96,18 +110,17 @@ setImmediate(async () => {
 
                 while (true) {
                     const request = (await blconn1.brpopBuffer(`proxy,${connectionID}`, 0))?.[1]
-                    logger("What 3 is request\n" + request![1])
                     if (!request) {
                         logger("proxy chunk is null for " + connectionID, "error")
                         clearInterval(pinger)
-                        blconn1.disconnect()
+                        blconn1.quit()
                         sockets.delete(connectionID)
                         break
                     } else if (!Buffer.from('end', 'binary').compare(request)) {
                         logger("breaking the " + connectionID, "info")
                         sockets.delete(connectionID)
                         clearInterval(pinger)
-                        blconn1.disconnect()
+                        blconn1.quit()
                         break
                     }
                     if (!sockets.has(connectionID)) {
@@ -116,7 +129,7 @@ setImmediate(async () => {
                             logger(`There is no working DNS for ${dstaddr} with ${connectionID} ID`, "error")
                             await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
                             clearInterval(pinger)
-                            blconn1.disconnect()
+                            blconn1.quit()
                             sockets.delete(connectionID)
                             break
                         }
@@ -144,7 +157,8 @@ setImmediate(async () => {
                         })
                         if (!res) {
                             clearInterval(pinger)
-                            blconn1.disconnect()
+                            sockets.delete(connectionID)
+                            blconn1.quit()
                             break
                         }
 
@@ -185,14 +199,13 @@ setImmediate(async () => {
                             logger(`Sending half close signal to appserver,${connectionID}`, "info")
                             await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
                             clearInterval(pinger)
-                            blconn1.disconnect()
+                            blconn1.quit()
                             sockets.delete(connectionID)
                         })
                     } else
                         sockets.get(connectionID)?.write(request)
                 }
             } catch (e) {
-                logger(`${e}`)
             }
         })
     }
@@ -207,9 +220,13 @@ setInterval(async () => {
     }
 }, 10000)
 
+process.on('uncaughtException', (error) => {
+    logger(`Uncaught exception ${error}`, "error")
+})
+
 process.on('SIGTERM', async () => {
     logger("Stopping the server", "info")
-    await conn.del(`inform`)
+    await conn.del("inform")
     for (const element of sockets.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
@@ -220,7 +237,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
     logger("Stopping the server", "info")
-    await conn.del(`inform`)
+    await conn.del("inform")
     for (const element of sockets.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)

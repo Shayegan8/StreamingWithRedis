@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { exit } from 'process'
 import { Redis } from 'ioredis'
 import PQueue from 'p-queue'
+
 import config from '../config.json' with { type: 'json' }
 
 const conn = new Redis(config.connstring, {
@@ -10,7 +11,11 @@ const conn = new Redis(config.connstring, {
     tls: { servername: config.servername }
 })
 
-conn.ping()
+try {
+    conn.ping()
+} catch (e) {
+    logger("conn ping error: " + e, "error")
+}
 
 function logger(param: string, type?: string) {
     console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
@@ -106,15 +111,19 @@ const server = net.createServer((socket) => {
 
                         socket.once('error', (e) => {
                             logger(`Client error: ${e}`, "error")
+                            clearInterval(pinger)
+                            clearInterval(interv)
+                            blconn.quit()
+                            connlist.delete(connectionID)
                         })
 
                         socket.on('end', () => {
                             logger(`Sending half close signal to proxy,${connectionID}`, "info")
                             conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
                             clearInterval(pinger)
-                            blconn.disconnect()
-                            connlist.delete(connectionID)
                             clearInterval(interv)
+                            blconn.quit()
+                            connlist.delete(connectionID)
                         })
 
                         const server_reply = Buffer.alloc(10)
@@ -137,15 +146,25 @@ const server = net.createServer((socket) => {
                             tls: { servername: config.servername }
                         })
 
+                        try {
+                            blconn.ping()
+                        } catch (e) {
+                            logger("blconn ping error: " + e, "error")
+                            clearInterval(interv)
+                            socket.end()
+                            connlist.delete(connectionID)
+                        }
                         const pinger = setInterval(async () => {
                             try {
                                 await blconn.ping()
                             } catch (e) {
                                 logger("pinger: " + e, "info")
                                 clearInterval(pinger)
+                                clearInterval(interv)
+                                socket.end()
+                                connlist.delete(connectionID)
                             }
                         }, 10000)
-
                         while (true) {
                             try {
                                 const response = await blconn.brpopBuffer(`appserver,${connectionID}`, 0)
@@ -153,7 +172,9 @@ const server = net.createServer((socket) => {
                                     logger(`end for ${connectionID} from targetServer`, "info")
                                     await conn.del(`appserver,${connectionID}`)
                                     clearInterval(pinger)
-                                    blconn.disconnect()
+                                    clearInterval(interv)
+                                    blconn.quit()
+                                    connlist.delete(connectionID)
                                     socket.end()
                                     break
                                 }
@@ -161,14 +182,19 @@ const server = net.createServer((socket) => {
                                 if (!Buffer.from('end', 'binary').compare(response![1])) {
                                     logger(`server chunk for ${connectionID} is null`, "info")
                                     clearInterval(pinger)
-                                    blconn.disconnect()
+                                    clearInterval(interv)
+                                    blconn.quit()
+                                    connlist.delete(connectionID)
                                     socket.end()
                                     await conn.del(`appserver,${connectionID}`)
                                     break
                                 }
                                 socket.write(response![1])
                             } catch (error) {
-                                logger(`${error}`)
+                                clearInterval(pinger)
+                                clearInterval(interv)
+                                connlist.delete(connectionID)
+                                socket.end()
                                 break
                             }
                         }
@@ -181,6 +207,7 @@ const server = net.createServer((socket) => {
     })
 })
 
+
 setInterval(async () => {
     try {
         conn.ping()
@@ -189,10 +216,14 @@ setInterval(async () => {
     }
 }, 10000)
 
+process.on('uncaughtException', (error) => {
+    logger(`Uncaught exception ${error}`, "error")
+})
+
 process.on('SIGTERM', async () => {
     logger("Stopping the server", "info")
     server.close()
-    await conn.del(`inform`)
+    await conn.del("inform")
     for (const element of connlist.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
@@ -204,7 +235,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
     logger("Stopping the server", "info")
     server.close()
-    await conn.del(`inform`)
+    await conn.del("inform")
     for (const element of connlist.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
