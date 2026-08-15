@@ -10,6 +10,8 @@ const conn = new Redis(config.connstring, {
     tls: { servername: config.servername }
 })
 
+conn.ping()
+
 function logger(param: string, type?: string) {
     console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
         : (type == "error" ? `[\x1b[31mERR\x1b[0m] ${param}` : param))
@@ -102,6 +104,10 @@ const server = net.createServer((socket) => {
                             })
                         }, 100)
 
+                        socket.once('error', (e) => {
+                            logger(`Client error: ${e}`, "error")
+                        })
+
                         socket.on('end', () => {
                             logger(`Sending half close signal to proxy,${connectionID}`, "info")
                             conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
@@ -130,6 +136,7 @@ const server = net.createServer((socket) => {
                             maxRetriesPerRequest: null,
                             tls: { servername: config.servername }
                         })
+
                         const pinger = setInterval(async () => {
                             try {
                                 await blconn.ping()
@@ -173,7 +180,6 @@ const server = net.createServer((socket) => {
         })
     })
 })
-
 
 setInterval(async () => {
     try {

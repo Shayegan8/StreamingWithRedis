@@ -3,6 +3,7 @@ import dns from 'dns/promises'
 import { Redis } from 'ioredis'
 import { exit } from 'process'
 import PQueue from 'p-queue'
+
 import config from '../config.json' with { type: 'json' }
 
 const conn = new Redis(config.connstring, {
@@ -10,10 +11,14 @@ const conn = new Redis(config.connstring, {
     tls: { servername: config.servername }
 })
 
+conn.ping()
+
 const blconn = new Redis(config.connstring, {
     maxRetriesPerRequest: null,
     tls: { servername: config.servername }
 })
+
+blconn.ping()
 
 function logger(param: string, type?: string) {
     console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
@@ -79,6 +84,7 @@ setImmediate(async () => {
                     maxRetriesPerRequest: null,
                     tls: { servername: config.servername }
                 })
+                blconn1.ping()
                 const pinger = setInterval(async () => {
                     try {
                         await blconn1.ping()
