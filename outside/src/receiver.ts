@@ -209,6 +209,7 @@ setInterval(async () => {
 
 process.on('SIGTERM', async () => {
     logger("Stopping the server", "info")
+    await conn.del(`inform`)
     for (const element of sockets.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
@@ -219,6 +220,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
     logger("Stopping the server", "info")
+    await conn.del(`inform`)
     for (const element of sockets.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)

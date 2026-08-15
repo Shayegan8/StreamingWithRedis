@@ -192,6 +192,7 @@ setInterval(async () => {
 process.on('SIGTERM', async () => {
     logger("Stopping the server", "info")
     server.close()
+    await conn.del(`inform`)
     for (const element of connlist.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
@@ -203,6 +204,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
     logger("Stopping the server", "info")
     server.close()
+    await conn.del(`inform`)
     for (const element of connlist.keys()) {
         await conn.del(`proxy,${element}`)
         await conn.del(`appserver,${element}`)
