@@ -30,27 +30,22 @@ const server = net.createServer((socket) => {
             reply[0] = 0x05 // VER
             reply[1] = 0x00 // NO AUTHENTICATION REQUIRED ONLY
             socket.write(reply)
-            logger("sub-negotiation finished", "info")
         }
         socket.once('data', async (data: Buffer) => {
-            if (data[2] == 0x00 && data.length >= 10) { // we got rsv before gta6
+            if (data[2] == 0x00 && data.length >= 10) {
                 // DST.ADDR, DST.PORT
                 let DSTADDR: string
                 let DSTPORT
                 let portOffset
-                let addressLength
-                // data transfering between proxy and application server happnes here
                 switch (data[3]) { // ATYP
                     case 0x01: // IPv4
                         DSTADDR = [data[4], data[5], data[6], data[7]].join('.')
                         portOffset = 8
-                        addressLength = 4
                         break
                     case 0x03: // DOMAINNAME
                         const numberOfBytes = data.readUInt8(4)
                         DSTADDR = data.subarray(5, 5 + numberOfBytes).toString()
                         portOffset = 5 + numberOfBytes
-                        addressLength = numberOfBytes
                         break
                     case 0x04: // IPv6
                         let IPv6: string[] = []
@@ -58,7 +53,6 @@ const server = net.createServer((socket) => {
                             IPv6.push(data.readUInt16BE(i).toString(16))
                         DSTADDR = IPv6.join(':')
                         portOffset = 20
-                        addressLength = 16
                         break
                     default:
                         return
@@ -70,7 +64,7 @@ const server = net.createServer((socket) => {
                 switch (data[1]) { // cmd
                     case 0x01: // CONNECT
                         let connectionID = crypto.randomUUID()
-                        logger("FUCKING ID " + connectionID)
+                        logger("Informing for " + connectionID, "info")
                         await conn.lpush(`inform`, `${DSTADDR},${DSTPORT},${connectionID}`)
 
                         let pqueue = new PQueue({ concurrency: 1 })
@@ -87,11 +81,10 @@ const server = net.createServer((socket) => {
                         const interv = setInterval(async () => {
                             pqueue.add(async () => {
                                 if (length > 1024 * 500) {
-                                    logger("The generated reqID ")
+                                    logger(`Pushing BIG batch to proxy,${connectionID}`, "info")
                                     conn.lpush(`proxy,${connectionID}`, Buffer.concat(buff))
                                     connlist.set(connectionID, true)
                                     buff = []
-                                    logger("Added? " + `proxy,${connectionID}`)
                                     length = 0
                                     return
                                 }
@@ -99,20 +92,18 @@ const server = net.createServer((socket) => {
                                     length = buff.length
                                 else {
                                     if (buff.length != 0) {
-                                        logger("it means there?")
                                         length = 0
-                                        logger("The generated reqID ")
                                         connlist.set(connectionID, true)
+                                        logger(`Pushing batch to proxy,${connectionID}`, "info")
                                         conn.lpush(`proxy,${connectionID}`, Buffer.concat(buff))
                                         buff = []
-                                        logger("Added? " + `proxy,${connectionID}`)
-                                        logger("What is the length now?" + buff.length)
                                     }
                                 }
                             })
                         }, 100)
 
                         socket.on('end', () => {
+                            logger(`Sending half close signal to proxy,${connectionID}`, "info")
                             conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
                             clearInterval(pinger)
                             blconn.disconnect()
@@ -120,7 +111,6 @@ const server = net.createServer((socket) => {
                             clearInterval(interv)
                         })
 
-                        logger("connection once")
                         const server_reply = Buffer.alloc(10)
                         server_reply[0] = 0x05 // VER
                         server_reply[1] = 0x00 // REP
@@ -135,7 +125,7 @@ const server = net.createServer((socket) => {
                         server_reply[8] = 0
                         server_reply[9] = 0
                         socket.write(server_reply)
-                        logger(`CONNECT done for ${connectionID}`, "info")
+                        logger(`CONNECT done for ${connectionID} with ${DSTADDR} destination`, "info")
                         const blconn = new Redis(config.connstring, {
                             maxRetriesPerRequest: null,
                             tls: { servername: config.servername }
@@ -144,7 +134,7 @@ const server = net.createServer((socket) => {
                             try {
                                 await blconn.ping()
                             } catch (e) {
-                                logger("pinger: " + e)
+                                logger("pinger: " + e, "info")
                                 clearInterval(pinger)
                             }
                         }, 10000)
@@ -153,7 +143,7 @@ const server = net.createServer((socket) => {
                             try {
                                 const response = await blconn.brpopBuffer(`appserver,${connectionID}`, 0)
                                 if (!response) {
-                                    logger(`end for ${connectionID} from targetServer`)
+                                    logger(`end for ${connectionID} from targetServer`, "info")
                                     await conn.del(`appserver,${connectionID}`)
                                     clearInterval(pinger)
                                     blconn.disconnect()
@@ -161,9 +151,8 @@ const server = net.createServer((socket) => {
                                     break
                                 }
 
-                                logger(`this mf got fucking called, ${connectionID}`)
                                 if (!Buffer.from('end', 'binary').compare(response![1])) {
-                                    logger(`response for ${connectionID} is null ;(`)
+                                    logger(`server chunk for ${connectionID} is null`, "info")
                                     clearInterval(pinger)
                                     blconn.disconnect()
                                     socket.end()
@@ -190,21 +179,29 @@ setInterval(async () => {
     try {
         conn.ping()
     } catch (e) {
-        logger("gPinger: " + e)
+        logger("gPinger: " + e, "info")
     }
 }, 10000)
 
-process.on('SIGTERM', () => {
-    for (const element of connlist.keys())
-        conn.del(`appserver,${element}`)
+process.on('SIGTERM', async () => {
+    logger("Stopping the server", "info")
+    server.close()
+    for (const element of connlist.keys()) {
+        await conn.del(`proxy,${element}`)
+        await conn.del(`appserver,${element}`)
+    }
+    logger("Removing chunks completed", "info")
     exit(0)
 })
 
-process.on('SIGINT', () => {
-    for (const element of connlist.keys())
-        conn.del(`proxy,${element}`)
-
+process.on('SIGINT', async () => {
+    logger("Stopping the server", "info")
     server.close()
+    for (const element of connlist.keys()) {
+        await conn.del(`proxy,${element}`)
+        await conn.del(`appserver,${element}`)
+    }
+    logger("Removing chunks completed", "info")
     exit(0)
 })
 
