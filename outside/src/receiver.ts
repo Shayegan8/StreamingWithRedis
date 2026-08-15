@@ -3,7 +3,6 @@ import dns from 'dns/promises'
 import { Redis } from 'ioredis'
 import { exit } from 'process'
 import PQueue from 'p-queue'
-
 import config from '../config.json' with { type: 'json' }
 
 const conn = new Redis(config.connstring, {
@@ -29,8 +28,9 @@ try {
 }
 
 function logger(param: string, type?: string) {
-    console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
-        : (type == "error" ? `[\x1b[31mERR\x1b[0m] ${param}` : param))
+    const date = new Date(Date.now())
+    console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()} ${param}`
+        : (type == "error" ? `[\x1b[31mERR\x1b[0m] ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()} ${param}` : param))
 }
 
 //DNS RESOLVE, for now its not optimized but works atleast
@@ -105,6 +105,7 @@ setImmediate(async () => {
                     } catch (e) {
                         logger("pinger: " + e, "info")
                         clearInterval(pinger)
+                        sockets.delete(connectionID)
                     }
                 }, 10000)
 
@@ -193,7 +194,6 @@ setImmediate(async () => {
                                 }, 100)
                             })
                         })
-
                         // notify the proxy appserver dont sends data anymore (half close)
                         appServer.on('end', async () => {
                             logger(`Sending half close signal to appserver,${connectionID}`, "info")
@@ -221,7 +221,7 @@ setInterval(async () => {
 }, 10000)
 
 process.on('uncaughtException', (error) => {
-    logger(`Uncaught exception ${error}`, "error")
+    logger(`Uncaught exception for lpush ${error}`, "error")
 })
 
 process.on('SIGTERM', async () => {

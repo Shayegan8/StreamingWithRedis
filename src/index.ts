@@ -18,8 +18,9 @@ try {
 }
 
 function logger(param: string, type?: string) {
-    console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${param}`
-        : (type == "error" ? `[\x1b[31mERR\x1b[0m] ${param}` : param))
+    const date = new Date(Date.now())
+    console.log(type == "info" ? `[\x1b[33mINFO\x1b[0m] ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()} ${param}`
+        : (type == "error" ? `[\x1b[31mERR\x1b[0m] ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()} ${param}` : param))
 }
 
 const connlist = new Map<string, any>()
