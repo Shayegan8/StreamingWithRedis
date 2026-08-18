@@ -1,6 +1,6 @@
 # Streaming over Redis database
 This is a really simple VPN that uses Redis as message bus and routes your traffic through your VPN server with it.
-It uses AES-256-GCM encryption, well this dosent stop fucking dpi with its mitm technique to stopping me using the database endpoint 
+It uses AES-256-GCM encryption, well this dosent stop fucking dpi with its to stopping me using the database endpoint, they cant see the packets so they call them suspicious 
 
 # Installation
 Put outside directory in your vps and run these commands
