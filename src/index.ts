@@ -25,6 +25,8 @@ function logger(param: string, type?: string) {
 
 const connlist = new Map<string, any>()
 
+const symmetricKey = Buffer.from(config.symmetricKey, "hex")
+
 const server = net.createServer((socket) => {
     socket.on('error', (err) => {
         logger(`Client error: ${err.message}`, "error")
@@ -73,7 +75,12 @@ const server = net.createServer((socket) => {
                     case 0x01: // CONNECT
                         let connectionID = crypto.randomUUID()
                         logger("Informing for " + connectionID, "info")
-                        await conn.lpush(`inform`, `${DSTADDR},${DSTPORT},${connectionID}`)
+                        const msg = Buffer.from(`${DSTADDR},${DSTPORT},${connectionID}`, 'binary')
+                        const iv = crypto.randomBytes(12)
+                        const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                        const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                        const tag = cipher.getAuthTag()
+                        await conn.lpush(`inform`, Buffer.concat([iv, tag, encryptedMsg]))
 
                         let pqueue = new PQueue({ concurrency: 1 })
                         let buff: Buffer[] = []
@@ -90,7 +97,13 @@ const server = net.createServer((socket) => {
                             pqueue.add(async () => {
                                 if (length > 1024 * 500) {
                                     logger(`Pushing BIG batch to proxy,${connectionID}`, "info")
-                                    conn.lpush(`proxy,${connectionID}`, Buffer.concat(buff))
+                                    const msg = Buffer.concat(buff)
+                                    const iv = crypto.randomBytes(12)
+                                    const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                                    const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                                    const tag = cipher.getAuthTag()
+
+                                    await conn.lpush(`proxy,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                                     connlist.set(connectionID, true)
                                     buff = []
                                     length = 0
@@ -103,7 +116,12 @@ const server = net.createServer((socket) => {
                                         length = 0
                                         connlist.set(connectionID, true)
                                         logger(`Pushing batch to proxy,${connectionID}`, "info")
-                                        conn.lpush(`proxy,${connectionID}`, Buffer.concat(buff))
+                                        const msg = Buffer.concat(buff)
+                                        const iv = crypto.randomBytes(12)
+                                        const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                                        const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                                        const tag = cipher.getAuthTag()
+                                        await conn.lpush(`proxy,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                                         buff = []
                                     }
                                 }
@@ -118,9 +136,14 @@ const server = net.createServer((socket) => {
                             connlist.delete(connectionID)
                         })
 
-                        socket.on('end', () => {
+                        socket.on('end', async () => {
                             logger(`Sending half close signal to proxy,${connectionID}`, "info")
-                            conn.lpush(`proxy,${connectionID}`, Buffer.from('end', 'binary'))
+                            const msg = Buffer.from('end', 'binary')
+                            const iv = crypto.randomBytes(12)
+                            const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                            const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                            const tag = cipher.getAuthTag()
+                            await conn.lpush(`proxy,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                             clearInterval(pinger)
                             clearInterval(interv)
                             blconn.quit()
@@ -179,8 +202,13 @@ const server = net.createServer((socket) => {
                                     socket.end()
                                     break
                                 }
-
-                                if (!Buffer.from('end', 'binary').compare(response![1])) {
+                                const extractIv = response[1].subarray(0, 12)
+                                const tag = response[1].subarray(12, 28)
+                                const encryptedChunk = response[1].subarray(28)
+                                const decipher = crypto.createDecipheriv("aes-256-gcm", symmetricKey, extractIv)
+                                decipher.setAuthTag(tag)
+                                const decryptedChunk = Buffer.concat([decipher.update(encryptedChunk), decipher.final()])
+                                if (!Buffer.from('end', 'binary').compare(decryptedChunk)) {
                                     logger(`server chunk for ${connectionID} is null`, "info")
                                     clearInterval(pinger)
                                     clearInterval(interv)
@@ -190,7 +218,7 @@ const server = net.createServer((socket) => {
                                     await conn.del(`appserver,${connectionID}`)
                                     break
                                 }
-                                socket.write(response![1])
+                                socket.write(decryptedChunk)
                             } catch (error) {
                                 clearInterval(pinger)
                                 clearInterval(interv)

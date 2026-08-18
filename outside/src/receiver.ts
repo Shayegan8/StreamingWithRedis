@@ -3,13 +3,13 @@ import dns from 'dns/promises'
 import { Redis } from 'ioredis'
 import { exit } from 'process'
 import PQueue from 'p-queue'
+import crypto from 'node:crypto'
 import config from '../config.json' with { type: 'json' }
 
 const conn = new Redis(config.connstring, {
     maxRetriesPerRequest: null,
     tls: { servername: config.servername }
 })
-
 try {
     conn.ping()
 } catch (e) {
@@ -36,6 +36,8 @@ function logger(param: string, type?: string) {
 //DNS RESOLVE, for now its not optimized but works atleast
 const workingDNSes = new Map<string, { ip: string, requiredTime: number }>() // Map<address, ip>
 let fastestDNSes = new Map<string, { ip: string, requiredTime: number }>() //Map<address, fastest ip>
+
+const symmetricKey = Buffer.from(config.symmetricKey, "hex")
 
 async function testConnection(address: string, ip: string, port: number): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
@@ -79,8 +81,15 @@ const sockets = new Map<string, Socket>()
 setImmediate(async () => {
     while (true) {
         logger("Waiting for inform", "info")
-        const payload = await blconn.blpop(`inform`, 0)
-        const things = payload?.[1].split(',')!
+        const payload = await blconn.brpopBuffer(`inform`, 0)
+        const extractIv = payload![1].subarray(0, 12)
+        const tag = payload![1].subarray(12, 28)
+        const encryptedChunk = payload![1].subarray(28)
+        const decipher = crypto.createDecipheriv("aes-256-gcm", symmetricKey, extractIv)
+        decipher.setAuthTag(tag)
+        const decryptedChunk = Buffer.concat([decipher.update(encryptedChunk), decipher.final()])
+
+        const things = decryptedChunk.toString('utf8').split(',')!
         const dstaddr = things[0]!
         const dstport = parseInt(things[1]!)
         const connectionID = things[2]!
@@ -117,7 +126,15 @@ setImmediate(async () => {
                         blconn1.quit()
                         sockets.delete(connectionID)
                         break
-                    } else if (!Buffer.from('end', 'binary').compare(request)) {
+                    }
+                    const extractIv = request.subarray(0, 12)
+                    const tag = request.subarray(12, 28)
+                    const encryptedChunk = request.subarray(28)
+                    const decipher = crypto.createDecipheriv("aes-256-gcm", symmetricKey, extractIv)
+                    decipher.setAuthTag(tag)
+                    const decryptedChunk = Buffer.concat([decipher.update(encryptedChunk), decipher.final()])
+
+                    if (!Buffer.from('end', 'binary').compare(decryptedChunk)) {
                         logger("breaking the " + connectionID, "info")
                         sockets.delete(connectionID)
                         clearInterval(pinger)
@@ -128,7 +145,12 @@ setImmediate(async () => {
                         const fastestWorkingIP = await getFastestIP(dstaddr, dstport)
                         if (!fastestWorkingIP) {
                             logger(`There is no working DNS for ${dstaddr} with ${connectionID} ID`, "error")
-                            await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                            const msg = Buffer.from('end', 'binary')
+                            const iv = crypto.randomBytes(12)
+                            const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                            const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                            const tag = cipher.getAuthTag()
+                            await conn.lpush(`appserver,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                             clearInterval(pinger)
                             blconn1.quit()
                             sockets.delete(connectionID)
@@ -163,7 +185,7 @@ setImmediate(async () => {
                             break
                         }
 
-                        sockets.get(connectionID)?.write(request)
+                        sockets.get(connectionID)?.write(decryptedChunk)
                         let buffass: Buffer[] = []
                         let timeout: NodeJS.Timeout
                         let pqueue = new PQueue({ concurrency: 1 })
@@ -177,7 +199,12 @@ setImmediate(async () => {
                                 pqueue.add(async () => {
                                     if (length > 1024 * 1024 * 2) { // bigger than 2mb
                                         logger(`Pushing BIG batch to appserver,${connectionID}`, "info")
-                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
+                                        const msg = Buffer.concat(buffass)
+                                        const iv = crypto.randomBytes(12)
+                                        const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                                        const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                                        const tag = cipher.getAuthTag()
+                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                                         buffass = []
                                         length = 0
                                     }
@@ -187,7 +214,12 @@ setImmediate(async () => {
                                         return
                                     pqueue.add(async () => {
                                         logger(`Pushing batch to appserver,${connectionID}`, "info")
-                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat(buffass))
+                                        const msg = Buffer.concat(buffass)
+                                        const iv = crypto.randomBytes(12)
+                                        const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                                        const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                                        const tag = cipher.getAuthTag()
+                                        await conn.lpush(`appserver,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                                         buffass = []
                                         length = 0
                                     })
@@ -197,13 +229,18 @@ setImmediate(async () => {
                         // notify the proxy appserver dont sends data anymore (half close)
                         appServer.on('end', async () => {
                             logger(`Sending half close signal to appserver,${connectionID}`, "info")
-                            await conn.lpush(`appserver,${connectionID}`, Buffer.from('end', 'binary'))
+                            const msg = Buffer.from('end', 'binary')
+                            const iv = crypto.randomBytes(12)
+                            const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
+                            const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
+                            const tag = cipher.getAuthTag()
+                            await conn.lpush(`appserver,${connectionID}`, Buffer.concat([iv, tag, encryptedMsg]))
                             clearInterval(pinger)
                             blconn1.quit()
                             sockets.delete(connectionID)
                         })
                     } else
-                        sockets.get(connectionID)?.write(request)
+                        sockets.get(connectionID)?.write(decryptedChunk)
                 }
             } catch (e) {
             }
@@ -221,7 +258,7 @@ setInterval(async () => {
 }, 10000)
 
 process.on('uncaughtException', (error) => {
-    logger(`Uncaught exception for lpush ${error}`, "error")
+    logger(`Uncaught exception ${error}`, "error")
 })
 
 process.on('SIGTERM', async () => {
