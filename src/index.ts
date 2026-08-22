@@ -170,6 +170,14 @@ const server = net.createServer((socket) => {
                             tls: { servername: config.servername }
                         })
 
+                        blconn.on('error', () => {
+                            logger("blconn error event: " + connectionID, "error")
+                            clearInterval(interv)
+                            clearInterval(pinger)
+                            socket.end()
+                            connlist.delete(connectionID)
+                        })
+
                         try {
                             blconn.ping()
                         } catch (e) {

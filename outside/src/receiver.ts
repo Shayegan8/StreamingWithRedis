@@ -101,6 +101,13 @@ setImmediate(async () => {
                     tls: { servername: config.servername }
                 })
 
+                blconn1.on('error', () => {
+                    logger("blconn error event: " + connectionID, "error")
+                    clearInterval(pinger)
+                    socket.end()
+                    sockets.delete(connectionID)
+                })
+
                 try {
                     blconn1.ping()
                 } catch (e) {
