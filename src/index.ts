@@ -12,7 +12,7 @@ const conn = new Redis(config.connstring, {
 })
 
 try {
-    conn.ping()
+    await conn.ping()
 } catch (e) {
     logger("conn ping error: " + e, "error")
 }
@@ -179,7 +179,7 @@ const server = net.createServer((socket) => {
                         })
 
                         try {
-                            blconn.ping()
+                            await blconn.ping()
                         } catch (e) {
                             logger("blconn ping error: " + e, "error")
                             clearInterval(interv)
@@ -247,7 +247,7 @@ const server = net.createServer((socket) => {
 
 setInterval(async () => {
     try {
-        conn.ping()
+        await conn.ping()
     } catch (e) {
         logger("gPinger: " + e, "info")
     }

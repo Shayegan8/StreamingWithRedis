@@ -11,7 +11,7 @@ const conn = new Redis(config.connstring, {
     tls: { servername: config.servername }
 })
 try {
-    conn.ping()
+    await conn.ping()
 } catch (e) {
     logger("conn ping error: " + e, "error")
 }
@@ -22,7 +22,7 @@ const blconn = new Redis(config.connstring, {
 })
 
 try {
-    blconn.ping()
+    await blconn.ping()
 } catch (e) {
     logger("blconn ping error: " + e, "error")
 }
@@ -104,12 +104,12 @@ setImmediate(async () => {
                 blconn1.on('error', () => {
                     logger("blconn error event: " + connectionID, "error")
                     clearInterval(pinger)
-                    socket.end()
+                    sockets.get(connectionID)?.end()
                     sockets.delete(connectionID)
                 })
 
                 try {
-                    blconn1.ping()
+                    await blconn1.ping()
                 } catch (e) {
                     logger("blconn1 ping error: " + e, "error")
                     return
@@ -257,8 +257,8 @@ setImmediate(async () => {
 
 setInterval(async () => {
     try {
-        conn.ping()
-        blconn.ping()
+        await conn.ping()
+        await blconn.ping()
     } catch (e) {
         logger("gPinger: " + e, "info")
     }
