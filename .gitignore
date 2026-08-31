@@ -1,6 +1,5 @@
 node_modules/
 dist/
-config.json
 outside/node_modules/
 outside/dist/
 outside/config.json

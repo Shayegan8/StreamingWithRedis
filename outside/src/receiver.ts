@@ -93,6 +93,7 @@ setImmediate(async () => {
         const dstaddr = things[0]!
         const dstport = parseInt(things[1]!)
         const connectionID = things[2]!
+	const atyp = things[3]!
         logger(`Waiting for proxy,${connectionID}`, "info")
         setImmediate(async () => {
             try {
@@ -149,7 +150,11 @@ setImmediate(async () => {
                         break
                     }
                     if (!sockets.has(connectionID)) {
-                        const fastestWorkingIP = await getFastestIP(dstaddr, dstport)
+                        let fastestWorkingIP: string | null
+			if atyp == "3"
+			    fastestWorkingIP = await getFastestIP(dstaddr, dstport)
+			else
+			    fastestWorkingIP = dstaddr
                         if (!fastestWorkingIP) {
                             logger(`There is no working DNS for ${dstaddr} with ${connectionID} ID`, "error")
                             const msg = Buffer.from('end', 'binary')

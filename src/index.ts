@@ -75,7 +75,7 @@ const server = net.createServer((socket) => {
                     case 0x01: // CONNECT
                         let connectionID = crypto.randomUUID()
                         logger("Informing for " + connectionID, "info")
-                        const msg = Buffer.from(`${DSTADDR},${DSTPORT},${connectionID}`, 'binary')
+                        const msg = Buffer.from(`${DSTADDR},${DSTPORT},${connectionID},${ATYP}`, 'binary')
                         const iv = crypto.randomBytes(12)
                         const cipher = crypto.createCipheriv("aes-256-gcm", symmetricKey, iv)
                         const encryptedMsg = Buffer.concat([cipher.update(msg), cipher.final()])
